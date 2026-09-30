@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #F7F8FB;
+  --color-surface: #FFFFFF;
+  --color-primary: #0A1A33;   /* navy */
+  --color-primary-light: #16305F;
+  --color-accent: #D4AF37;    /* dourado */
+  --color-text: #0A1A33;
+  --color-text-muted: #5B6B8C;
+  --color-border: #E7E9F2;
+}
+
+[data-theme='dark'] {
+  --color-bg: #050B1A;
+  --color-surface: #0A1A33;
+  --color-primary: #0F2247;
+  --color-primary-light: #1D3E77;
+  --color-accent: #EAD494;
+  --color-text: #F5F6FA;
+  --color-text-muted: #9BA9CB;
+  --color-border: #16305F;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Inter', sans-serif;
+}
+
+.font-display {
+  font-family: 'Playfair Display', serif;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--color-accent); border-radius: 8px; opacity: 0.5; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Impressão de relatórios: esconde navegação e controles ---------- */
+@media print {
+  aside, header, button, input[type='file'] { display: none !important; }
+  main { padding: 0 !important; overflow: visible !important; }
+  body { background: #fff !important; }
+  .shadow-luxury { box-shadow: none !important; border: 1px solid #ddd !important; }
+  @page { margin: 14mm; }
+}
