@@ -1,0 +1,278 @@
+// ==========================================================
+// ERP SaaS Multi-tenant - Schema do Banco de Dados
+// Banco recomendado: PostgreSQL (Supabase - plano gratuito)
+// ==========================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ----------------------------------------------------------
+// ENUMS
+// ----------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN   // Perfil mestre: controle total, cross-tenant
+  ADMIN         // Administrador do tenant (relatórios, config, exclusão)
+  COLLABORATOR  // Operacional (estoque, kanban, chat)
+}
+
+enum PlanName {
+  TOP // Único plano ativo hoje. Estrutura pronta para novos planos no futuro.
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUST
+}
+
+enum InfraType {
+  API
+  DATABASE
+  CLOUD_STORAGE
+  OTHER
+}
+
+enum InfraStatus {
+  NUNCA_TESTADO
+  ONLINE
+  OFFLINE
+}
+
+// ----------------------------------------------------------
+// SAAS / TENANTS / PLANOS
+// ----------------------------------------------------------
+
+model Plan {
+  id       String   @id @default(cuid())
+  name     PlanName @unique
+  label    String
+  active   Boolean  @default(false)
+  features Json     @default("{}")
+  tenants  Tenant[]
+}
+
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  segment     String? // varejo, mercadinho, restaurante, padaria, loja tech...
+  active      Boolean  @default(true)
+  planId      String
+  plan        Plan     @relation(fields: [planId], references: [id])
+  themeConfig Json     @default("{\"palette\":\"navy-gold\",\"mode\":\"light\"}")
+  createdAt   DateTime @default(now())
+
+  users           User[]
+  categories      Category[]
+  products        Product[]
+  stockMovements  StockMovement[]
+  kanbanBoards    KanbanBoard[]
+  chatRooms       ChatRoom[]
+  infraConfigs    InfraConfig[]
+  permissionOverrides RolePermissionOverride[]
+}
+
+// ----------------------------------------------------------
+// USUÁRIOS, PERFIS E PERMISSÕES
+// ----------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(COLLABORATOR)
+  avatarUrl    String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  stockMovements   StockMovement[]
+  kanbanCardsOwned KanbanCard[]        @relation("CardAssignee")
+  chatMemberships  ChatRoomMember[]
+  chatMessages     ChatMessage[]
+  permissionOverrides UserPermissionOverride[]
+
+  @@index([tenantId])
+}
+
+// Permite ao Super Admin ligar/desligar uma permissão específica para um usuário
+// (sobrepõe o padrão da matriz de perfis definida em código)
+model UserPermissionOverride {
+  id             String  @id @default(cuid())
+  userId         String
+  user           User    @relation(fields: [userId], references: [id])
+  permissionKey  String
+  allowed        Boolean
+  @@unique([userId, permissionKey])
+}
+
+// Permite ao Super Admin customizar a matriz por tenant (ex.: liberar relatório
+// financeiro para COLLABORATOR num tenant específico)
+model RolePermissionOverride {
+  id             String  @id @default(cuid())
+  tenantId       String
+  tenant         Tenant  @relation(fields: [tenantId], references: [id])
+  role           Role
+  permissionKey  String
+  allowed        Boolean
+  @@unique([tenantId, role, permissionKey])
+}
+
+// ----------------------------------------------------------
+// ESTOQUE / VAREJO
+// ----------------------------------------------------------
+
+model Category {
+  id       String    @id @default(cuid())
+  tenantId String
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  name     String
+  products Product[]
+
+  @@index([tenantId])
+}
+
+model Product {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  name       String
+  sku        String?
+  segment    String? // ex: alimenticio, tech, padaria...
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+  price      Decimal  @default(0) @db.Decimal(12, 2)
+  costPrice  Decimal  @default(0) @db.Decimal(12, 2)
+  stockQty   Int      @default(0)
+  minStock   Int      @default(0)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  movements StockMovement[]
+
+  @@index([tenantId])
+}
+
+model StockMovement {
+  id        String            @id @default(cuid())
+  tenantId  String
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+  productId String
+  product   Product           @relation(fields: [productId], references: [id])
+  type      StockMovementType
+  qty       Int
+  reason    String?
+  userId    String?
+  user      User?             @relation(fields: [userId], references: [id])
+  createdAt DateTime          @default(now())
+
+  @@index([tenantId])
+  @@index([productId])
+}
+
+// ----------------------------------------------------------
+// KANBAN
+// ----------------------------------------------------------
+
+model KanbanBoard {
+  id        String         @id @default(cuid())
+  tenantId  String
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
+  name      String
+  createdAt DateTime       @default(now())
+  columns   KanbanColumn[]
+
+  @@index([tenantId])
+}
+
+model KanbanColumn {
+  id      String       @id @default(cuid())
+  boardId String
+  board   KanbanBoard  @relation(fields: [boardId], references: [id])
+  name    String
+  order   Int          @default(0)
+  cards   KanbanCard[]
+}
+
+model KanbanCard {
+  id          String       @id @default(cuid())
+  columnId    String
+  column      KanbanColumn @relation(fields: [columnId], references: [id])
+  title       String
+  description String?
+  order       Int          @default(0)
+  priority    String       @default("normal") // baixa, normal, alta, urgente
+  assigneeId  String?
+  assignee    User?        @relation("CardAssignee", fields: [assigneeId], references: [id])
+  dueDate     DateTime?
+  createdAt   DateTime     @default(now())
+}
+
+// ----------------------------------------------------------
+// CHAT INTERNO
+// ----------------------------------------------------------
+
+model ChatRoom {
+  id        String           @id @default(cuid())
+  tenantId  String
+  tenant    Tenant           @relation(fields: [tenantId], references: [id])
+  name      String
+  isGroup   Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  members   ChatRoomMember[]
+  messages  ChatMessage[]
+
+  @@index([tenantId])
+}
+
+model ChatRoomMember {
+  id     String   @id @default(cuid())
+  roomId String
+  room   ChatRoom @relation(fields: [roomId], references: [id])
+  userId String
+  user   User     @relation(fields: [userId], references: [id])
+
+  @@unique([roomId, userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      ChatRoom @relation(fields: [roomId], references: [id])
+  senderId  String
+  sender    User     @relation(fields: [senderId], references: [id])
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([roomId])
+}
+
+// ----------------------------------------------------------
+// INFRAESTRUTURA (painel do administrador)
+// ----------------------------------------------------------
+
+model InfraConfig {
+  id           String      @id @default(cuid())
+  tenantId     String
+  tenant       Tenant      @relation(fields: [tenantId], references: [id])
+  name         String
+  type         InfraType
+  url          String
+  secretMasked String? // últimos 4 caracteres de uma chave, se houver
+  status       InfraStatus @default(NUNCA_TESTADO)
+  lastTestedAt DateTime?
+  createdAt    DateTime    @default(now())
+
+  @@index([tenantId])
+}
